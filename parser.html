@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+<title> Recursive Descent Parser for EBNF</title>
+<script>
+//Global Vars
+
+var chInd = 0; //keeps track of what character we're on
+var input, inputLen;
+var result; // to store the final result to print;
+var nextToken, nextChar, charClass; //tracking current lexeme and characters
+var lexeme; // lexeme currently being read
+
+// CHARACTER CLASSES
+var LETTER = 0;
+var DIGIT = 1;
+var SYMBOL = 2;
+var SPACE = 3;
+// LEXEME CLASSES
+var TERMINAL = 10;
+var IDENT = 11;
+var ASSIGN_OP = 20;  
+var OR_OP = 21;
+var COMMA = 24;
+var LEFT_PAREN = 25;
+var RIGHT_PAREN = 26;
+var UNDERSCORE = 27;
+var LEFT_CURLY = 28;
+var RIGHT_CURLY = 29;
+var LEFT_SQUARE = 30;
+var RIGHT_SQUARE = 31;
+var EOF = 50;
+var END_OF_LINE = 51;
+var UNKNOWN = 99;
+// Token codes for backwards translation
+var TokenObject = { 
+	10:"TERMINAL",
+	11:"IDENT",
+	20:"ASSIGN_OP",
+	24:"COMMA",
+	22:"SUB_OP",
+	23:"MULT_OP",
+	21:"OR_OP",
+	25:"LEFT_PAREN",
+	26:"RIGHT_PAREN",
+	27:"UNDERSCORE",
+	28:"LEFT_CURLY",
+	29:"RIGHT_CURLY",
+	30:"LEFT_SQUARE",
+	31:"RIGHT_SQUARE",
+	50:"EOF",
+	51:"END_OF_LINE"
+};
+//Drawing related vars
+var disp; //SVG drawing element
+var curX, curY; // cursor coordinates
+var arrowLen = 50; //length of the arrow line in SVG pixels, serves as a scale for the entire diagram
+var arrow_size = 4; //size of the arrow component in SVG pixels, independent of line size
+var rootX, rootY; //root coordinates are used to track the previous split in the rule, that you jump to in case of concurrent splits (e.g. a|b|c)
+var maxY;   // 
+// Lexical Analyzer 
+function addChar(){ //add current character to lexeme
+	lexeme = lexeme + nextChar;
+}
+function getChar(){		
+	chInd++;
+	if (chInd >= inputLen) { //if we reached the end of input, return EOF
+		charClass = EOF;	
+		nextChar = EOF;
+	}else {		//otherwise classify the character into one of the character groups
+		nextChar = input.charAt(chInd);				
+		if (/\w/.test(nextChar)) charClass = LETTER;
+		else if (/\d/.test(nextChar)) charClass = DIGIT;
+		else if (nextChar == '_') charClass = UNDERSCORE;
+		else if (/[{}()<'>"=|.,;]/.test(nextChar) || nextChar == '[' || nextChar == ']') charClass = SYMBOL;	
+		else if (/\s/.test(nextChar)) charClass = SPACE;
+		else {
+			charClass = UNKNOWN;
+			alert("Invalid Character: " + nextChar);			
+		}
+	} 
+}
+function getNonBlank(){ // if current character is space, keep getting a new character
+		while (charClass == SPACE) {			
+			getChar();
+		}
+}
+function lookup(){ //classifies symbol characters with their token meaning
+	switch (nextChar){
+		case '(':
+			addChar();
+			nextToken = LEFT_PAREN;
+			break;
+		case ')':
+			addChar();
+			nextToken = RIGHT_PAREN;
+			break;
+		case '{':
+			addChar();
+			nextToken = LEFT_CURLY;
+			break;
+		case '}':
+			addChar();
+			nextToken = RIGHT_CURLY;
+			break;
+		case '[':
+			addChar();
+			nextToken = LEFT_SQUARE;
+			break;
+		case ']':
+			addChar();
+			nextToken = RIGHT_SQUARE;
+			break;
+		case '|':
+			addChar();
+			nextToken = OR_OP;
+			break;
+		case ';':
+			addChar();
+			nextToken = END_OF_LINE;
+			break;
+		case ',':
+			addChar();
+			nextToken = COMMA;
+			break;
+		case '=':
+			addChar();
+			nextToken = ASSIGN_OP
+			break;
+		default:
+			alert("Invalid Symbol");			
+	}
+}
+function lex(){	
+	lexeme = "";
+	getNonBlank();		// skip spaces 
+	switch (charClass){
+		case LETTER: //leter can only be a start of IDENTITY
+			addChar(); //add the letter to lexeme
+			getChar(); //get a new char
+			//while the next character is one of acceptable IDENTITY components, keep adding and getting chars
+			while (charClass == LETTER || charClass == DIGIT || charClass == UNDERSCORE){ 
+				addChar();
+				getChar();
+			}
+			nextToken = IDENT;		//return identity token
+			result += 'Next token is: ' +TokenObject[nextToken]+' Next lexeme is: '+lexeme+'</br>';			
+			break;
+		case SYMBOL: //symbol can be a start of a terminal or a special character
+			if (nextChar == "'" || nextChar == '"'){ 
+				var quote = nextChar;		//remember the type of quote you read so you can terminate with it
+				//addChar()  //removed to avoid quotes in lexeme
+				getChar();
+				while (nextChar != quote && (charClass == LETTER || charClass == DIGIT || charClass == UNDERSCORE || charClass == SYMBOL)){
+					addChar();
+					getChar();					
+				}				
+				//addChar() //removed to avoid quotes in lexeme
+				getChar();
+				nextToken = TERMINAL;	//return terminal token
+				result += 'Next token is: ' +TokenObject[nextToken]+' Next lexeme is: '+lexeme+'</br>';
+			} else { // if it's not a quote, must be another special symbol, go to classify
+				lookup();
+				result += 'Next token is: ' +TokenObject[nextToken]+' Next lexeme is: '+lexeme+'</br>';
+				getChar();
+			} break;			
+		case EOF:	//Reached the end of the line		
+			break;
+		default:  //Unexpected Character 
+			alert("Invalid character in lex: " + nextChar);
+			getChar(); //advance to next character to avoid infinite loop
+	}
+}
+// Recursive Descent Parser 
+function lhs(){	
+	//LHS can only be an IDENTITY lexeme
+	result += "Entering lhs</br>";
+	if (nextToken == IDENT)	{	
+		draw_label(lexeme); //draw the big label on top for LHS
+		lex();
+	} else alert("LHS is Invalid");
+	result += "Exiting lhs</br>";
+}
+function exp(){ //exp was added to the original grammar to prevent left recursion 
+				// exp is either "|",rhs    or   ",",rhs   or   empty
+	result += "Entering exp </br>";
+	if (nextToken == OR_OP){		
+		var oldX = curX, oldY = curY;	//remember where we stopped					
+		curX = rootX;
+		curY = rootY;		//then set us back to the root					
+		maxY += arrowLen;	//increment maxheight by 1 arrowLen (scale)
+		while (curY < maxY) draw_arrow(0,arrowLen);	//go down to maxY
+		rootX = curX; rootY = curY; 	//set this as the new root
+		draw_arrow(arrowLen,0);			//go right		
+		lex();
+		rhs();		
+		//this part happens at the very end, but we can still connect the loose ends cause we tracked where we stopped each time				
+		var deltaX = curX - oldX;		
+		var deltaY = curY - oldY;
+		if (deltaX < 0) draw_arrow(-deltaX, 0); // if we're behind, catch up first
+		draw_arrow(0,-deltaY); // go up by as much as you have to
+		if (deltaX > 0) { // if the other side is behind, have it catch up		
+			curX = oldX; 
+			draw_arrow(deltaX,0);
+		}	
+		draw_arrow(arrowLen,0); // onwards arrow!
+		
+	} else if (nextToken == COMMA){		
+		//make current point the new root
+		rootX = curX;
+		rootY = curY;		
+		draw_arrow(arrowLen,0);	 //arrow_right
+		lex();
+		rhs();
+	} if (nextToken == END_OF_LINE){
+		//draw_arrow(arrowLen,0);
+	} result += "Exiting exp </br>";// If it's something else or empty nothing happens, that's the empty case
+}
+
+function rhs(){			
+	//every rhs is of the form <something> "," <exp> as a part the modified grammar
+	result += "Entering rhs </br>";
+	if (nextToken == IDENT){		// identity, ",", exp
+			draw_rect(lexeme,"blue");	//draw a blue square with a lexeme in it
+			draw_arrow(arrowLen,0);			//onwards!
+			lex();
+			exp();			
+	} else if (nextToken == TERMINAL){	//identity, ",", exp		
+			draw_rect(lexeme,"red");	//draw a red square with a lexeme in it
+			draw_arrow(arrowLen,0);		//onwards!
+			lex();
+			exp();
+	} else if (nextToken == LEFT_CURLY) {	// "{",rhs,"}",exp
+				// drawing Left curly and left square is pretty much the same with the exception of the extra arch				
+			var oldX = curX, oldY = curY;		//remember this as a point where we stopped to connect later
+			curX = rootX; curY = rootY; //set us back to the root			
+			draw_arrow(0,arrowLen);	//down
+			maxY = Math.max(maxY,curY);	//check if we hit a new high	
+			var memX = curX, memY = curY;	//remember this as a root to set later	
+			rootX = curX + arrowLen/2; //set root with a slight offset to resolve clashes with the OR cascade
+			rootY = curY;
+			draw_arrow(arrowLen,0);		//onwards!
+			lex();
+			rhs();
+			
+			if (nextToken == RIGHT_CURLY) {								
+				//draw a loop arch
+				var tmpX = curX, tmpY = curY;
+				curX -= arrowLen/4;
+				draw_arrow(0,-arrowLen/2);
+				draw_arrow(memX-curX+arrowLen/2,0);
+				draw_arrow(0,arrowLen/2);
+				//return to original track
+				curX = tmpX;
+				curY = tmpY;				
+				var deltaX = curX - oldX;	
+				var deltaY = curY - oldY;				
+				if (deltaX < 0) draw_arrow(-deltaX, 0); // if we're behind, catch up first
+				draw_arrow(0,-deltaY); //up, by as much as we need to go up
+				if (deltaX > 0) { // if the other side is behind, have it catch up		
+					curX = oldX; 
+					draw_arrow(deltaX,0);
+				}									
+				draw_arrow(arrowLen,0); //onwards!
+				rootX = memX; rootY = memY; //remember your roots
+				lex();
+				exp();
+			} else alert("curly bracket mismatch");		
+	} else if (nextToken == LEFT_SQUARE) { // "[",rhs,"]",exp
+			
+			var oldX = curX, oldY = curY;		//remember this as a point where we stopped to connect later
+			curX = rootX; curY = rootY; //set us back to the root			
+			draw_arrow(0,arrowLen);	//down
+			maxY = Math.max(maxY,curY);	//check if we hit a new high		
+			var memX = curX, memY = curY;	//remember this as a root to set later	
+			rootX = curX + arrowLen/2; //setting root with slight offset to resolve clashes with the OR cascade
+			rootY = curY;
+			draw_arrow(arrowLen,0);			//onwards
+			lex();
+			rhs();
+
+			if (nextToken == RIGHT_SQUARE) {											
+				var deltaX = curX - oldX;	
+				var deltaY = curY - oldY;
+				if (deltaX < 0) draw_arrow(-deltaX, 0); // if we're behind, catch up first
+				draw_arrow(0,-deltaY);//up by the difference
+				if (deltaX > 0) { // if the other side is behind, have it catch up		
+					curX = oldX; 
+					draw_arrow(deltaX,0);
+				}									
+				draw_arrow(arrowLen,0); //onwards!
+				rootX = memX; rootY = memY; //remember your roots
+				lex();
+				exp();				
+			} else alert("square bracket mismatch");
+	} else if (nextToken == LEFT_PAREN) {		// "(",rhs,")",exp
+			var oldX = rootX, oldY = rootY;		//remember root				
+			lex();
+			rhs();
+			if (nextToken == RIGHT_PAREN) {		
+				rootX = oldX; rootY = oldY;	//apply memorized root				
+				lex();				
+				exp();
+			}else alert("parenthesis mismatch");
+	}	
+	result += "Exiting rhs </br>";
+}
+
+
+function rule() {	
+	result += "Executing rule: <br>"; // rule is just lhs + "=" + rhs + ";"
+	lex();	
+	lhs();	
+	if (nextToken == ASSIGN_OP)	{
+		lex();		
+		// initial evaluation arrow
+		draw_arrow(arrowLen,0);
+		rootX = curX, rootY = curY; // set first root		
+		// and this is the "onwards" arrow
+		draw_arrow(arrowLen,0);
+		rhs();		
+		if (nextToken != END_OF_LINE) alert("No colon at the end");
+		
+	} else alert("Invalid Rule Syntax");
+	result += "Rule execution complete </br>";
+}
+// Drawing functions
+function draw_arrow(dx,dy){
+	//dx/dy are delta coordinates - how much curX and curY will change
+	//line
+	disp.innerHTML +=  '<path d="M ' + curX + " " + curY + " l " + dx + " " + dy + '" stroke-width="1" stroke="black" fill = "none" />';	
+	//arrow
+	var mx = curX + dx/2; //midpoint
+	var my = curY + dy/2;
+	var magnitude = Math.abs(dx) + Math.abs(dy);	
+	var sx = arrow_size*dx/magnitude; //a unit vector of original * arrow_size, to keep the arrow size constant
+	var sy = arrow_size*dy/magnitude;			
+	disp.innerHTML += '<polygon points="' + mx + ',' + my + " " + (mx-sx+sy) + "," + (my-sy-sx) + " " + (mx-sx-sy) + "," + (my-sy+sx) + '" />';
+	//move the cursor automatically
+	curX += dx; // move the cursor automatically
+	curY += dy;
+}
+
+function draw_label(label){
+	disp.innerHTML += '<text x="10" y="40" style="font-size:40">' + label + ':</text>';
+}
+function draw_rect(id, color){	
+	//the following values were guestimated and adjusted to fit the font. Changing one might require changing others as well.
+	var offset =3;
+	var scale_factor = 0.6;
+	var font_size = 20;
+	var rect_width =  offset*2 + id.length*font_size*scale_factor;		
+	var rect_height = arrowLen / 2;	
+	//rectangle
+	disp.innerHTML += '<rect x="' + curX + '" y="' + (curY-rect_height/2) + '" width="' + rect_width + '" height="' + rect_height + '" rx = "3" ry = "3" stroke="' + color + '" style="fill:none; stroke-width:1;" />';			 
+	//text
+	disp.innerHTML += '<text x="' + (curX + offset) + '" y="' + (curY + font_size*scale_factor/2) + '" style="font-family:Courier; font-size:' + font_size + '">' + id + '</text>';
+	curX += rect_width;
+}
+// Button press triggers evaluation of the rule
+function eval() {
+	input = document.getElementById("getlist").value; //setting input box
+	disp = document.getElementById("display");  //setting graphics box	
+	disp.innerHTML = "";	//cleaning "graphics"
+	inputLen = input.length;			
+	chInd = -1;		
+	result = "";
+	getChar(); //read first char (at index 0)
+	//starting cursor coordinates 
+	curX = 0;
+	curY = 100;	
+	maxY = 100; //and maximum height hit so far
+	rule(); //starts the recursion (magic happens)
+	document.getElementById("printArea").innerHTML = result;	
+	//test drawing functions
+	//draw_arrow(100,100);
+	//draw_rect("test","green");
+	
+	
+}
+</script>
+<body>
+<h1>EBNF Rule Parser </h1>
+<p>
+ Enter an <a href="https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_Form">EBNF rule</a> : <input type="text" name="list" id="getlist" size ="100" value='LeftSide = ((this | "that" , {something | "other"})|["terminal",id]|ID,"TERMINAL");'> 
+<button onclick="eval()">Parse!</button>
+</p>
+
+
+<svg height = "700" width = "1920" id = "display">
+</svg>
+<p id="printArea"> </p>
+
+</body>
+</html>
